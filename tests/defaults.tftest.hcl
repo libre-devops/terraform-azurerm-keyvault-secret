@@ -83,6 +83,32 @@ run "version_passthrough" {
   }
 }
 
+# Both dates set: exercises the date-ordering check (a good date pair should apply cleanly).
+run "dated_secret" {
+  command = apply
+
+  variables {
+    secrets = {
+      dated = {
+        generate        = true
+        not_before_date = "2026-01-01T00:00:00Z"
+        expiration_date = "2027-01-01T00:00:00Z"
+      }
+    }
+    secret_values = {}
+  }
+
+  assert {
+    condition     = azurerm_key_vault_secret.this["dated"].not_before_date == "2026-01-01T00:00:00Z"
+    error_message = "not_before_date should pass through."
+  }
+
+  assert {
+    condition     = azurerm_key_vault_secret.this["dated"].expiration_date == "2027-01-01T00:00:00Z"
+    error_message = "expiration_date should pass through."
+  }
+}
+
 # An invalid secret name is rejected by variable validation.
 run "rejects_invalid_secret_name" {
   command = plan

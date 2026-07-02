@@ -1,12 +1,14 @@
 # check blocks run after every plan and apply and warn (without blocking) on configuration that would
 # quietly misbehave.
 
-# not_before_date must precede expiration_date. RFC3339 UTC timestamps sort correctly as strings.
+# not_before_date must precede expiration_date. timecmp returns -1/0/1, so it compares the instants
+# numerically (Terraform's < operator only works on numbers, not on RFC3339 strings). try() keeps an
+# unparseable date from aborting the check; the provider rejects a malformed date anyway.
 check "dates_are_ordered" {
   assert {
     condition = alltrue([
       for s in values(var.secrets) :
-      (s.not_before_date == null || s.expiration_date == null) ? true : s.not_before_date < s.expiration_date
+      (s.not_before_date == null || s.expiration_date == null) ? true : try(timecmp(s.not_before_date, s.expiration_date) < 0, true)
     ])
     error_message = "One or more secrets have not_before_date on or after expiration_date."
   }
