@@ -53,7 +53,7 @@ with the `keyvault` module, which creates the vault and grants the writer access
 ```hcl
 module "keyvault_secret" {
   source  = "libre-devops/keyvault-secret/azurerm"
-  version = "~> 1.0"
+  version = "~> 4.0"
 
   key_vault_id = module.keyvault.ids["kv-ldo-uks-prd-001"]
   tags         = module.tags.tags
