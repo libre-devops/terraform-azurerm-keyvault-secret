@@ -6,6 +6,13 @@ locals {
 
 data "azurerm_client_config" "current" {}
 
+# The runner's public egress IP, so it can be allow-listed on the vault firewall (this subscription
+# enforces default-deny network rules on key vaults, so the writer's IP must be permitted).
+module "runner_ip" {
+  source  = "libre-devops/get-ip-address/external"
+  version = "~> 4.0"
+}
+
 module "tags" {
   source  = "libre-devops/tags/azurerm"
   version = "~> 4.0"
@@ -24,8 +31,8 @@ module "rg" {
 }
 
 # A vault to hold the secret. Access policies (not RBAC) grant the caller secret access so the write
-# works immediately (no RBAC propagation wait). purge_protection is off only so the example is
-# disposable; leave it at the default (true) for real vaults.
+# works immediately (no RBAC propagation wait), and the runner IP is allow-listed so the data-plane
+# write is not blocked by the firewall. purge_protection is off only so the example is disposable.
 module "keyvault" {
   source  = "libre-devops/keyvault/azurerm"
   version = "~> 4.0"
@@ -38,6 +45,11 @@ module "keyvault" {
     (local.kv_name) = {
       rbac_authorization_enabled = false
       purge_protection_enabled   = false
+      network_acls = {
+        default_action = "Deny"
+        bypass         = "AzureServices"
+        ip_rules       = ["${module.runner_ip.public_ip_address}/32"]
+      }
       access_policies = [
         {
           object_id          = data.azurerm_client_config.current.object_id
@@ -45,6 +57,16 @@ module "keyvault" {
         }
       ]
     }
+  }
+}
+
+# Give the vault firewall rule a moment to take effect before the data-plane secret write.
+resource "time_sleep" "kv_firewall" {
+  create_duration = "60s"
+
+  triggers = {
+    vault = module.keyvault.ids[local.kv_name]
+    ip    = module.runner_ip.public_ip_address
   }
 }
 
@@ -59,4 +81,6 @@ module "keyvault_secret" {
   secrets = {
     "example-generated" = { generate = true }
   }
+
+  depends_on = [time_sleep.kv_firewall]
 }

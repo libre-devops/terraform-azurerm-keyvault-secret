@@ -33,6 +33,13 @@ locals {
 
 data "azurerm_client_config" "current" {}
 
+# The runner's public egress IP, so it can be allow-listed on the vault firewall (this subscription
+# enforces default-deny network rules on key vaults, so the writer's IP must be permitted).
+module "runner_ip" {
+  source  = "libre-devops/get-ip-address/external"
+  version = "~> 4.0"
+}
+
 module "tags" {
   source  = "libre-devops/tags/azurerm"
   version = "~> 4.0"
@@ -51,8 +58,8 @@ module "rg" {
 }
 
 # A vault to hold the secret. Access policies (not RBAC) grant the caller secret access so the write
-# works immediately (no RBAC propagation wait). purge_protection is off only so the example is
-# disposable; leave it at the default (true) for real vaults.
+# works immediately (no RBAC propagation wait), and the runner IP is allow-listed so the data-plane
+# write is not blocked by the firewall. purge_protection is off only so the example is disposable.
 module "keyvault" {
   source  = "libre-devops/keyvault/azurerm"
   version = "~> 4.0"
@@ -65,6 +72,11 @@ module "keyvault" {
     (local.kv_name) = {
       rbac_authorization_enabled = false
       purge_protection_enabled   = false
+      network_acls = {
+        default_action = "Deny"
+        bypass         = "AzureServices"
+        ip_rules       = ["${module.runner_ip.public_ip_address}/32"]
+      }
       access_policies = [
         {
           object_id          = data.azurerm_client_config.current.object_id
@@ -72,6 +84,16 @@ module "keyvault" {
         }
       ]
     }
+  }
+}
+
+# Give the vault firewall rule a moment to take effect before the data-plane secret write.
+resource "time_sleep" "kv_firewall" {
+  create_duration = "60s"
+
+  triggers = {
+    vault = module.keyvault.ids[local.kv_name]
+    ip    = module.runner_ip.public_ip_address
   }
 }
 
@@ -86,6 +108,8 @@ module "keyvault_secret" {
   secrets = {
     "example-generated" = { generate = true }
   }
+
+  depends_on = [time_sleep.kv_firewall]
 }
 ```
 
@@ -95,12 +119,14 @@ module "keyvault_secret" {
 |------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11.0, < 2.0.0 |
 | <a name="requirement_azurerm"></a> [azurerm](#requirement\_azurerm) | >= 4.23.0, < 5.0.0 |
+| <a name="requirement_time"></a> [time](#requirement\_time) | >= 0.9.0, < 1.0.0 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
 | <a name="provider_azurerm"></a> [azurerm](#provider\_azurerm) | >= 4.23.0, < 5.0.0 |
+| <a name="provider_time"></a> [time](#provider\_time) | >= 0.9.0, < 1.0.0 |
 
 ## Modules
 
@@ -109,12 +135,14 @@ module "keyvault_secret" {
 | <a name="module_keyvault"></a> [keyvault](#module\_keyvault) | libre-devops/keyvault/azurerm | ~> 4.0 |
 | <a name="module_keyvault_secret"></a> [keyvault\_secret](#module\_keyvault\_secret) | ../../ | n/a |
 | <a name="module_rg"></a> [rg](#module\_rg) | libre-devops/rg/azurerm | ~> 4.0 |
+| <a name="module_runner_ip"></a> [runner\_ip](#module\_runner\_ip) | libre-devops/get-ip-address/external | ~> 4.0 |
 | <a name="module_tags"></a> [tags](#module\_tags) | libre-devops/tags/azurerm | ~> 4.0 |
 
 ## Resources
 
 | Name | Type |
 |------|------|
+| [time_sleep.kv_firewall](https://registry.terraform.io/providers/hashicorp/time/latest/docs/resources/sleep) | resource |
 | [azurerm_client_config.current](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/data-sources/client_config) | data source |
 
 ## Inputs
