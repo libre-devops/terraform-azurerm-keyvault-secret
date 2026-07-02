@@ -18,7 +18,8 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "~> 1.9"
+          # 1.11+ is required for the module's write-only (value_wo) secret handling.
+          terraform_version: "~> 1.11"
 
       - name: PSScriptAnalyzer
         shell: pwsh
